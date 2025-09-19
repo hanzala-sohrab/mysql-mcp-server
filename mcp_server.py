@@ -1,29 +1,31 @@
+#!/usr/bin/env python3
+"""
+MCP MySQL Server - A proper Model Context Protocol server for MySQL database operations
+with natural language query support using Ollama/Llama 3.2
+"""
+
 import os
 import json
 import logging
 from typing import Dict, List, Optional, Any
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
 import mysql.connector
 from mysql.connector import Error
 import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-import uvicorn
 from dotenv import load_dotenv
+from mcp.server.fastmcp import FastMCP
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging to stderr (important for MCP servers)
+logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="MCP MySQL Server",
-    description="MCP server for MySQL database operations with Ollama/Llama 3.2 integration",
-)
+# Initialize FastMCP server
+mcp = FastMCP("MySQL Database Server")
 
 # Database configuration
 DB_CONFIG = {
@@ -43,23 +45,6 @@ engine = None
 SessionLocal = None
 
 
-class QueryRequest(BaseModel):
-    query: str
-    natural_language: bool = False
-
-
-class QueryResponse(BaseModel):
-    success: bool
-    data: Optional[List[Dict]] = None
-    message: str
-    sql_query: Optional[str] = None
-
-
-class TableInfo(BaseModel):
-    name: str
-    columns: List[Dict]
-
-
 def get_db_connection():
     """Create a database connection"""
     try:
@@ -67,7 +52,7 @@ def get_db_connection():
         return connection
     except Error as e:
         logger.error(f"Error connecting to MySQL: {e}")
-        raise HTTPException(status_code=500, detail=f"Database connection error: {e}")
+        raise Exception(f"Database connection error: {e}")
 
 
 def init_database():
@@ -94,34 +79,28 @@ def query_ollama(prompt: str) -> str:
             return response.json().get("response", "")
         else:
             logger.error(f"Ollama API error: {response.status_code} - {response.text}")
-            raise HTTPException(status_code=500, detail="Ollama API error")
+            raise Exception("Ollama API error")
     except Exception as e:
         logger.error(f"Error querying Ollama: {e}")
-        raise HTTPException(status_code=500, detail=f"Ollama query error: {e}")
+        raise Exception(f"Ollama query error: {e}")
 
 
 def natural_language_to_sql(natural_query: str, schema_info: str) -> str:
     """Convert natural language query to SQL using Ollama"""
-    prompt = f"""
-    You are a SQL expert. Convert the following natural language query to SQL.
+    prompt = f"""You are a SQL expert. Convert the following natural language query to SQL.
     
-    Database Schema:
-    {schema_info}
-    
-    Natural Language Query: {natural_query}
-    
-    Return only the SQL query without any explanation or formatting.
-    """
+        Database Schema:
+        {schema_info}
 
-    sql_query = query_ollama(prompt)
-    # Clean up the response
-    sql_query = sql_query.strip().replace("```sql", "").replace("```", "").strip()
-    return sql_query
+        Natural Language Query: {natural_query}
+
+        Return only the SQL query without any explanation or formatting:
+    """
+    return query_ollama(prompt)
 
 
 def get_database_schema() -> str:
     """Get database schema information"""
-    schema_info = []
     try:
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
@@ -130,126 +109,132 @@ def get_database_schema() -> str:
         cursor.execute("SHOW TABLES")
         tables = cursor.fetchall()
 
+        schema_info = "Database Schema:\n\n"
+
         for table in tables:
             table_name = list(table.values())[0]
+            schema_info += f"Table: {table_name}\n"
+
+            # Get columns for this table
             cursor.execute(f"DESCRIBE {table_name}")
             columns = cursor.fetchall()
 
-            schema_info.append(f"Table: {table_name}")
-            for col in columns:
-                schema_info.append(f"  - {col['Field']} ({col['Type']})")
+            for column in columns:
+                col_name = column["Field"]
+                col_type = column["Type"]
+                col_null = "NULL" if column["Null"] == "YES" else "NOT NULL"
+                col_key = column["Key"]
+                col_default = column["Default"]
+
+                schema_info += f"  - {col_name}: {col_type} {col_null}"
+                if col_key:
+                    schema_info += f" {col_key}"
+                if col_default:
+                    schema_info += f" DEFAULT {col_default}"
+                schema_info += "\n"
+
+            schema_info += "\n"
 
         cursor.close()
         connection.close()
-
-        return "\n".join(schema_info)
+        return schema_info
     except Exception as e:
         logger.error(f"Error getting database schema: {e}")
-        return ""
+        return f"Error getting schema: {e}"
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup"""
+# Initialize database on startup
+try:
     init_database()
+except Exception as e:
+    logger.error(f"Failed to initialize database: {e}")
 
 
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {"message": "MCP MySQL Server is running", "version": "1.0.0"}
+# === MCP TOOLS ===
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    try:
-        connection = get_db_connection()
-        connection.close()
-        return {"status": "healthy", "database": "connected"}
-    except Exception as e:
-        return {"status": "unhealthy", "database": "disconnected", "error": str(e)}
+@mcp.tool()
+async def execute_sql_query(query: str) -> str:
+    """Execute a SQL query and return the results.
 
-
-@app.get("/schema", response_model=List[TableInfo])
-async def get_schema():
-    """Get database schema"""
+    Args:
+        query: The SQL query to execute (SELECT, INSERT, UPDATE, DELETE, etc.)
+    """
     try:
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        tables_info = []
+        # Execute the query
+        cursor.execute(query)
 
-        # Get all tables
-        cursor.execute("SHOW TABLES")
-        tables = cursor.fetchall()
+        # For SELECT queries, fetch the results
+        if query.strip().upper().startswith("SELECT"):
+            results = cursor.fetchall()
 
-        for table in tables:
-            table_name = list(table.values())[0]
-            cursor.execute(f"DESCRIBE {table_name}")
-            columns = cursor.fetchall()
+            if not results:
+                cursor.close()
+                connection.close()
+                return "Query executed successfully. No results returned."
 
-            table_info = TableInfo(name=table_name, columns=columns)
-            tables_info.append(table_info)
+            # Format results as a readable string
+            output = f"Query Results ({len(results)} rows):\n\n"
 
-        cursor.close()
-        connection.close()
+            # Add headers
+            if results:
+                headers = list(results[0].keys())
+                output += "| " + " | ".join(headers) + " |\n"
+                output += (
+                    "|" + "|".join(["-" * len(header) for header in headers]) + "|\n"
+                )
 
-        return tables_info
+                # Add data rows
+                for row in results:
+                    output += (
+                        "| "
+                        + " | ".join(str(row[header]) for header in headers)
+                        + " |\n"
+                    )
+
+            cursor.close()
+            connection.close()
+            return output
+
+        else:
+            # For non-SELECT queries, return affected rows
+            affected_rows = cursor.rowcount
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return f"Query executed successfully. {affected_rows} rows affected."
+
     except Exception as e:
-        logger.error(f"Error getting schema: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting schema: {e}")
+        return f"Error executing query: {str(e)}"
 
 
-@app.post("/query", response_model=QueryResponse)
-async def execute_query(request: QueryRequest):
-    """Execute a SQL query or natural language query"""
+@mcp.tool()
+async def natural_language_query(natural_query: str) -> str:
+    """Convert natural language to SQL and execute the query.
+
+    Args:
+        natural_query: A natural language description of the query you want to execute
+    """
     try:
-        sql_query = request.query
-        schema_info = ""
+        # Get database schema
+        schema_info = get_database_schema()
 
-        # If natural language query, convert to SQL first
-        if request.natural_language:
-            schema_info = get_database_schema()
-            sql_query = natural_language_to_sql(request.query, schema_info)
+        # Convert natural language to SQL
+        sql_query = natural_language_to_sql(natural_query, schema_info)
 
         # Execute the SQL query
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        return await execute_sql_query(sql_query)
 
-        cursor.execute(sql_query)
-
-        # Check if it's a SELECT query or other type
-        if sql_query.strip().upper().startswith("SELECT"):
-            results = cursor.fetchall()
-            data = results
-        else:
-            # For INSERT, UPDATE, DELETE, etc.
-            connection.commit()
-            affected_rows = cursor.rowcount
-            data = [{"affected_rows": affected_rows}]
-
-        cursor.close()
-        connection.close()
-
-        return QueryResponse(
-            success=True,
-            data=data,
-            message="Query executed successfully",
-            sql_query=sql_query if request.natural_language else None,
-        )
-
-    except Error as e:
-        logger.error(f"Database error: {e}")
-        raise HTTPException(status_code=400, detail=f"Database error: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+        return f"Error processing natural language query: {str(e)}"
 
 
-@app.get("/tables")
-async def get_tables():
-    """Get list of all tables in the database"""
+@mcp.tool()
+async def list_tables() -> str:
+    """List all tables in the database."""
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
@@ -260,42 +245,194 @@ async def get_tables():
         cursor.close()
         connection.close()
 
-        # Extract table names from the result
-        table_names = [table[0] for table in tables]
+        if not tables:
+            return "No tables found in the database."
 
-        return {"tables": table_names}
+        output = "Tables in the database:\n\n"
+        for i, table in enumerate(tables, 1):
+            table_name = table[0]
+            output += f"{i}. {table_name}\n"
+
+        return output
+
     except Exception as e:
-        logger.error(f"Error getting tables: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting tables: {e}")
+        return f"Error listing tables: {str(e)}"
 
 
-@app.get("/table/{table_name}")
-async def get_table_info(table_name: str):
-    """Get information about a specific table"""
+@mcp.tool()
+async def describe_table(table_name: str) -> str:
+    """Get detailed information about a specific table.
+
+    Args:
+        table_name: The name of the table to describe
+    """
     try:
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
+
+        # Check if table exists
+        cursor.execute("SHOW TABLES")
+        tables = [list(table.values())[0] for table in cursor.fetchall()]
+
+        if table_name not in tables:
+            cursor.close()
+            connection.close()
+            return (
+                f"Table '{table_name}' not found. Available tables: {', '.join(tables)}"
+            )
 
         # Get table structure
         cursor.execute(f"DESCRIBE {table_name}")
         columns = cursor.fetchall()
 
-        # Get first 10 rows as sample data
-        cursor.execute(f"SELECT * FROM {table_name} LIMIT 10")
-        sample_data = cursor.fetchall()
+        # Get row count
+        cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
+        row_count = cursor.fetchone()["count"]
 
         cursor.close()
         connection.close()
 
-        return {
-            "table_name": table_name,
-            "columns": columns,
-            "sample_data": sample_data,
-        }
+        output = f"Table: {table_name}\n"
+        output += f"Rows: {row_count}\n\n"
+        output += "Columns:\n\n"
+
+        for col in columns:
+            output += f"- {col['Field']}: {col['Type']}\n"
+            output += f"  - Null: {'YES' if col['Null'] == 'YES' else 'NO'}\n"
+            output += f"  - Key: {col['Key'] or 'None'}\n"
+            output += f"  - Default: {col['Default'] or 'None'}\n"
+            output += f"  - Extra: {col['Extra'] or 'None'}\n\n"
+
+        return output
+
     except Exception as e:
-        logger.error(f"Error getting table info: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting table info: {e}")
+        return f"Error describing table: {str(e)}"
+
+
+@mcp.tool()
+async def get_table_data(table_name: str, limit: int = 10) -> str:
+    """Get sample data from a table.
+
+    Args:
+        table_name: The name of the table
+        limit: Maximum number of rows to return (default: 10)
+    """
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        # Check if table exists
+        cursor.execute("SHOW TABLES")
+        tables = [list(table.values())[0] for table in cursor.fetchall()]
+
+        if table_name not in tables:
+            cursor.close()
+            connection.close()
+            return (
+                f"Table '{table_name}' not found. Available tables: {', '.join(tables)}"
+            )
+
+        # Get sample data
+        query = f"SELECT * FROM {table_name} LIMIT {limit}"
+        cursor.execute(query)
+        results = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+
+        if not results:
+            return f"No data found in table '{table_name}'."
+
+        # Format results
+        output = f"Sample data from {table_name} (showing {len(results)} rows):\n\n"
+
+        # Add headers
+        headers = list(results[0].keys())
+        output += "| " + " | ".join(headers) + " |\n"
+        output += "|" + "|".join(["-" * len(header) for header in headers]) + "|\n"
+
+        # Add data rows
+        for row in results:
+            output += "| " + " | ".join(str(row[header]) for header in headers) + " |\n"
+
+        return output
+
+    except Exception as e:
+        return f"Error getting table data: {str(e)}"
+
+
+# === MCP RESOURCES ===
+
+
+@mcp.resource("schema://database")
+async def get_database_schema_resource() -> str:
+    """Get the complete database schema as a resource."""
+    return get_database_schema()
+
+
+@mcp.resource("schema://tables/{table_name}")
+async def get_table_schema_resource(table_name: str) -> str:
+    """Get schema information for a specific table.
+
+    Args:
+        table_name: The name of the table
+    """
+    return await describe_table(table_name)
+
+
+@mcp.resource("data://tables/{table_name}")
+async def get_table_data_resource(table_name: str) -> str:
+    """Get sample data from a table as a resource.
+
+    Args:
+        table_name: The name of the table
+    """
+    return await get_table_data(table_name, limit=5)
+
+
+# === MCP PROMPTS ===
+
+
+@mcp.prompt()
+def sql_query_assistant(query_description: str) -> str:
+    """Generate a prompt for helping with SQL query creation.
+
+    Args:
+        query_description: Description of what you want to query
+    """
+    return f"""I need help creating a SQL query for the following request:
+
+        {query_description}
+
+        Please help me by:
+        1. Understanding what data I need to retrieve
+        2. Suggesting the appropriate SQL query
+        3. Explaining how the query works
+
+        I have access to the database schema and can execute queries to test them.
+    """
+
+
+@mcp.prompt()
+def database_analysis_task(analysis_goal: str) -> str:
+    """Generate a prompt for database analysis tasks.
+
+    Args:
+        analysis_goal: What you want to analyze in the database
+    """
+    return f"""I need to perform a database analysis with the following goal:
+
+        {analysis_goal}
+
+        Please help me by:
+        1. Understanding what tables and data are relevant
+        2. Suggesting the queries needed to gather the required information
+        3. Helping me interpret the results
+
+        I can explore the database schema, execute queries, and analyze the data.
+    """
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Initialize and run the server
+    mcp.run(transport="stdio")
