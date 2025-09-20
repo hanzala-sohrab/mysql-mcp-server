@@ -1,4 +1,4 @@
-# MCP MySQL Server
+# MySQL MCP Server
 
 A proper Model Context Protocol (MCP) server that enables natural language interaction with MySQL databases using Ollama and Llama 3.2.
 
