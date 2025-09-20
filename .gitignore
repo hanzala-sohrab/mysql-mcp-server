@@ -88,3 +88,7 @@ Thumbs.db
 
 # Ollama (if running locally)
 .ollama/
+
+# Logs
+mcp.log
+mcp.log.*

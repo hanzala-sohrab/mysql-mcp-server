@@ -21,7 +21,15 @@ import sys
 load_dotenv()
 
 # Configure logging to stderr (important for MCP servers)
-logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+log_file_path = os.path.join(script_dir, "mcp.log")
+logging.basicConfig(
+    level=logging.DEBUG,
+    # stream=sys.stderr,
+    filename=log_file_path,
+    filemode="a",
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
