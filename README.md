@@ -1,11 +1,11 @@
 # MySQL MCP Server
 
-A proper Model Context Protocol (MCP) server that enables natural language interaction with MySQL databases using Ollama and Llama 3.2.
+A proper Model Context Protocol (MCP) server that enables natural language interaction with MySQL databases.
 
 ## Features
 
 - **MCP Protocol Compliance**: Implements the official Model Context Protocol specification
-- **Natural Language to SQL**: Convert natural language queries to SQL using Llama 3.2
+<!-- - **Natural Language to SQL**: Convert natural language queries to SQL using Llama 3.2 -->
 - **Direct SQL Execution**: Execute raw SQL queries safely
 - **Database Schema Exploration**: Explore database structure and table information
 - **MCP Tools**: Expose database operations as MCP tools
@@ -28,7 +28,7 @@ A proper Model Context Protocol (MCP) server that enables natural language inter
 pip install -r requirements.txt
 ```
 
-### 2. Setup Ollama
+<!-- ### 2. Setup Ollama
 
 Make sure Ollama is installed and running:
 
@@ -41,9 +41,9 @@ ollama serve
 
 # Pull Llama 3.2 model
 ollama pull llama3.2
-```
+``` -->
 
-### 3. Configure Environment
+### 2. Configure Environment
 
 Copy the environment template and configure your database settings:
 
@@ -60,10 +60,6 @@ DB_USER=your_mysql_user
 DB_PASSWORD=your_mysql_password
 DB_NAME=your_database_name
 DB_PORT=3306
-
-# Ollama Configuration
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
 ```
 
 ## MCP Tools
@@ -75,10 +71,10 @@ Execute a SQL query and return the results.
 - **Parameters**: `query` (string) - The SQL query to execute
 - **Returns**: Formatted query results
 
-### `natural_language_query`
+<!-- ### `natural_language_query`
 Convert natural language to SQL and execute the query.
 - **Parameters**: `natural_query` (string) - Natural language description of the query
-- **Returns**: Query results after converting to SQL
+- **Returns**: Query results after converting to SQL -->
 
 ### `list_tables`
 List all tables in the database.
@@ -180,7 +176,7 @@ python mcp_server.py
 
 ## Usage Examples
 
-### Natural Language Queries
+<!-- ### Natural Language Queries
 
 Once connected to an MCP client, you can use natural language:
 
@@ -188,7 +184,7 @@ Once connected to an MCP client, you can use natural language:
 "Show me all users from the users table"
 "Find orders placed in the last 30 days"
 "Count the number of products in each category"
-```
+``` -->
 
 ### Direct SQL Queries
 
@@ -222,12 +218,12 @@ python test_mcp_server.py
    - Check database credentials in `.env`
    - Ensure the database exists
 
-2. **Ollama Connection Issues**
+<!-- 2. **Ollama Connection Issues**
    - Verify Ollama is running: `ollama serve`
    - Check if Llama 3.2 is pulled: `ollama list`
-   - Verify Ollama URL is correct
+   - Verify Ollama URL is correct -->
 
-3. **MCP Server Not Detected**
+2. **MCP Server Not Detected**
    - Check server configuration in client settings
    - Verify the server script path is correct
    - Check for syntax errors in the server code
@@ -246,7 +242,7 @@ LOG_LEVEL=DEBUG
 - Use database users with limited privileges
 - Consider using connection pooling for production
 - Validate all SQL queries to prevent injection attacks
-- Use HTTPS for Ollama connections in production
+<!-- - Use HTTPS for Ollama connections in production -->
 
 ## Contributing
 

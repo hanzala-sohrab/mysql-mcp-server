@@ -44,9 +44,9 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", "3306")),
 }
 
-# Ollama configuration
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+# # Ollama configuration
+# OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+# OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # Database connection pool
 engine = None
@@ -76,35 +76,35 @@ def init_database():
         raise
 
 
-def query_ollama(prompt: str) -> str:
-    """Send a prompt to Ollama and get response"""
-    try:
-        response = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-        )
-        if response.status_code == 200:
-            return response.json().get("response", "")
-        else:
-            logger.error(f"Ollama API error: {response.status_code} - {response.text}")
-            raise Exception("Ollama API error")
-    except Exception as e:
-        logger.error(f"Error querying Ollama: {e}")
-        raise Exception(f"Ollama query error: {e}")
+# def query_ollama(prompt: str) -> str:
+#     """Send a prompt to Ollama and get response"""
+#     try:
+#         response = requests.post(
+#             f"{OLLAMA_URL}/api/generate",
+#             json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+#         )
+#         if response.status_code == 200:
+#             return response.json().get("response", "")
+#         else:
+#             logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+#             raise Exception("Ollama API error")
+#     except Exception as e:
+#         logger.error(f"Error querying Ollama: {e}")
+#         raise Exception(f"Ollama query error: {e}")
 
 
-def natural_language_to_sql(natural_query: str, schema_info: str) -> str:
-    """Convert natural language query to SQL using Ollama"""
-    prompt = f"""You are a SQL expert. Convert the following natural language query to SQL.
+# def natural_language_to_sql(natural_query: str, schema_info: str) -> str:
+#     """Convert natural language query to SQL using Ollama"""
+#     prompt = f"""You are a SQL expert. Convert the following natural language query to SQL.
     
-        Database Schema:
-        {schema_info}
+#         Database Schema:
+#         {schema_info}
 
-        Natural Language Query: {natural_query}
+#         Natural Language Query: {natural_query}
 
-        Return only the SQL query without any explanation or formatting:
-    """
-    return query_ollama(prompt)
+#         Return only the SQL query without any explanation or formatting:
+#     """
+#     return query_ollama(prompt)
 
 
 def get_database_schema() -> str:
@@ -219,25 +219,25 @@ async def execute_sql_query(query: str) -> str:
         return f"Error executing query: {str(e)}"
 
 
-@mcp.tool()
-async def natural_language_query(natural_query: str) -> str:
-    """Convert natural language to SQL and execute the query.
+# @mcp.tool()
+# async def natural_language_query(natural_query: str) -> str:
+#     """Convert natural language to SQL and execute the query.
 
-    Args:
-        natural_query: A natural language description of the query you want to execute
-    """
-    try:
-        # Get database schema
-        schema_info = get_database_schema()
+#     Args:
+#         natural_query: A natural language description of the query you want to execute
+#     """
+#     try:
+#         # Get database schema
+#         schema_info = get_database_schema()
 
-        # Convert natural language to SQL
-        sql_query = natural_language_to_sql(natural_query, schema_info)
+#         # Convert natural language to SQL
+#         sql_query = natural_language_to_sql(natural_query, schema_info)
 
-        # Execute the SQL query
-        return await execute_sql_query(sql_query)
+#         # Execute the SQL query
+#         return await execute_sql_query(sql_query)
 
-    except Exception as e:
-        return f"Error processing natural language query: {str(e)}"
+#     except Exception as e:
+#         return f"Error processing natural language query: {str(e)}"
 
 
 @mcp.tool()
